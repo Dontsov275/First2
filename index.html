@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Аналитика производства</title>
+    <style>
+        /* Стили */
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            border-radius: 5px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            text-align: center;
+            color: #2c3e50;
+        }
+        .controls {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+        }
+        button {
+            padding: 10px 15px;
+            background: #3498db;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        button:hover {
+            background: #2980b9;
+        }
+        #fileName {
+            margin-top: 10px;
+            font-size: 14px;
+            color: #7f8c8d;
+        }
+        canvas {
+            max-width: 100%;
+            margin-top: 20px;
+        }
+        .notification {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 15px;
+            background: #2ecc71;
+            color: white;
+            border-radius: 5px;
+            animation: fadeIn 0.3s;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Аналитика производства</h1>
+        
+        <div class="controls">
+            <input type="file" id="csvUpload" accept=".csv" style="display:none;">
+            <button onclick="document.getElementById('csvUpload').click()">Загрузить CSV</button>
+            <p id="fileName">Файл не выбран</p>
+        </div>
+        
+        <div id="chartsContainer"></div>
+    </div>
+
+    <script>
+        // Мини-версия Chart.js (основные функции)
+        class MiniChart {
+            constructor(ctx, type, data, options) {
+                this.ctx = ctx;
+                this.type = type;
+                this.data = data;
+                this.options = options || {};
+                this.draw();
+            }
+            
+            draw() {
+                const { labels, datasets } = this.data;
+                const width = this.ctx.canvas.width;
+                const height = this.ctx.canvas.height;
+                const padding = 40;
+                
+                // Очистка
+                this.ctx.clearRect(0, 0, width, height);
+                
+                // Оси
+                this.ctx.beginPath();
+                this.ctx.moveTo(padding, padding);
+                this.ctx.lineTo(padding, height - padding);
+                this.ctx.lineTo(width - padding, height - padding);
+                this.ctx.strokeStyle = '#ccc';
+                this.ctx.stroke();
+                
+                // Заголовок
+                if (this.options.title) {
+                    this.ctx.font = '16px Arial';
+                    this.ctx.fillStyle = '#333';
+                    this.ctx.textAlign = 'center';
+                    this.ctx.fillText(this.options.title, width / 2, 30);
+                }
+                
+                // Данные
+                datasets.forEach((dataset, i) => {
+                    const color = dataset.backgroundColor || `hsl(${i * 360 / datasets.length}, 70%, 50%)`;
+                    const barWidth = (width - 2 * padding) / labels.length * 0.8;
+                    
+                    labels.forEach((label, j) => {
+                        const value = dataset.data[j] || 0;
+                        const x = padding + j * (width - 2 * padding) / labels.length;
+                        const y = height - padding - (value / Math.max(...dataset.data)) * (height - 2 * padding);
+                        
+                        this.ctx.fillStyle = color;
+                        this.ctx.fillRect(x, y, barWidth, height - padding - y);
+                    });
+                });
+            }
+        }
+
+        // Основное приложение
+        document.addEventListener('DOMContentLoaded', function() {
+            const fileInput = document.getElementById('csvUpload');
+            const fileNameDisplay = document.getElementById('fileName');
+            const chartsContainer = document.getElementById('chartsContainer');
+            
+            let appData = [];
+            
+            fileInput.addEventListener('change', function(e) {
+                const file = e.target.files[0];
+                if (!file) return;
+                
+                fileNameDisplay.textContent = `Файл: ${file.name}`;
+                
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    try {
+                        const csvText = e.target.result;
+                        const data = parseCSV(csvText);
+                        if (data.length > 0) {
+                            appData = data;
+                            showNotification("Данные загружены успешно!");
+                            renderCharts(data);
+                        } else {
+                            showNotification("Файл не содержит данных", "error");
+                        }
+                    } catch (error) {
+                        showNotification(`Ошибка: ${error.message}`, "error");
+                    }
+                };
+                reader.readAsText(file);
+            });
+            
+            function parseCSV(text) {
+                const lines = text.split('\n').filter(line => line.trim() !== '');
+                if (lines.length < 2) throw new Error("CSV файл пуст");
+                
+                const headers = lines[0].split(',');
+                return lines.slice(1).map(line => {
+                    const values = line.split(',');
+                    return headers.reduce((obj, header, i) => {
+                        obj[header.trim()] = values[i] ? values[i].trim() : '';
+                        return obj;
+                    }, {});
+                });
+            }
+            
+            function renderCharts(data) {
+                chartsContainer.innerHTML = '';
+                
+                // Получаем список цехов
+                const workshops = [...new Set(data.map(row => row['Цех']))].sort();
+                
+                // Создаем графики для каждого показателя
+                ['Выпуск', 'Брак', 'Простой'].forEach(indicator => {
+                    const canvas = document.createElement('canvas');
+                    canvas.width = 800;
+                    canvas.height = 400;
+                    chartsContainer.appendChild(canvas);
+                    
+                    const ctx = canvas.getContext('2d');
+                    
+                    // Подготовка данных
+                    const chartData = {
+                        labels: workshops,
+                        datasets: [{
+                            label: indicator,
+                            data: workshops.map(workshop => {
+                                const workshopData = data.filter(row => row['Цех'] === workshop);
+                                return workshopData.reduce((sum, row) => sum + (parseFloat(row[indicator]) || 0), 0);
+                            }),
+                            backgroundColor: '#3498db'
+                        }]
+                    };
+                    
+                    // Рисуем график
+                    new MiniChart(ctx, 'bar', chartData, {
+                        title: indicator
+                    });
+                });
+            }
+            
+            function showNotification(message, type = 'success') {
+                const notification = document.createElement('div');
+                notification.className = 'notification';
+                notification.textContent = message;
+                notification.style.background = type === 'error' ? '#e74c3c' : '#2ecc71';
+                document.body.appendChild(notification);
+                
+                setTimeout(() => {
+                    notification.remove();
+                }, 3000);
+            }
+        });
+    </script>
+</body>
+</html>
